@@ -1,0 +1,544 @@
+REPORT  Z_DOCUMENT.
+
+
+
+DATA: it_pcfile TYPE filetable,
+      wa_pcfile TYPE file_table.
+
+DATA: it_appfile TYPE TABLE OF ddshretval,
+      wa_appfile TYPE ddshretval.
+
+SELECTION-SCREEN BEGIN OF BLOCK b1 WITH FRAME TITLE text-001.
+
+PARAMETERS: p_upl  RADIOBUTTON GROUP g1 USER-COMMAND flag DEFAULT 'X' MODIF ID mf1,
+            p_down RADIOBUTTON GROUP g1 MODIF ID mf1,
+            p_del  RADIOBUTTON GROUP g1 MODIF ID mf1.
+
+SELECTION-SCREEN BEGIN OF LINE.
+PARAMETERS p_chk1 AS CHECKBOX MODIF ID mf5.
+PARAMETERS p_pres1 RADIOBUTTON GROUP g2 USER-COMMAND flag1 DEFAULT 'X' MODIF ID mf2 .
+SELECTION-SCREEN COMMENT 7(25) text-002 FOR FIELD p_pres1 MODIF ID mf2.
+SELECTION-SCREEN END OF LINE.
+
+SELECTION-SCREEN BEGIN OF LINE.
+PARAMETERS p_chk2 AS CHECKBOX MODIF ID mf5.
+PARAMETERS p_appl1 RADIOBUTTON GROUP g2 MODIF ID mf2.
+SELECTION-SCREEN COMMENT 7(25) text-003 FOR FIELD p_appl1 MODIF ID mf2.
+SELECTION-SCREEN END OF LINE.
+
+SELECTION-SCREEN BEGIN OF LINE.
+SELECTION-SCREEN COMMENT 10(30) text-008 MODIF ID mf6.
+PARAMETERS p_dir TYPE localfile MODIF ID mf6."#EC *
+SELECTION-SCREEN END OF LINE.
+
+SELECTION-SCREEN BEGIN OF LINE.
+SELECTION-SCREEN COMMENT 10(30) text-005 MODIF ID mf3.
+PARAMETERS p_pres TYPE localfile MODIF ID mf3.
+SELECTION-SCREEN END OF LINE.
+
+SELECTION-SCREEN BEGIN OF LINE.
+SELECTION-SCREEN COMMENT 10(30) text-006 MODIF ID mf4.
+PARAMETERS p_appl TYPE txt1024 MODIF ID mf4 .
+SELECTION-SCREEN END OF LINE.
+
+SELECTION-SCREEN BEGIN OF LINE.
+SELECTION-SCREEN COMMENT 10(30) text-007 MODIF ID mf7.
+PARAMETERS p_file TYPE txt1024 MODIF ID mf7."#EC *
+SELECTION-SCREEN END OF LINE.
+
+SELECTION-SCREEN END OF BLOCK b1.
+
+AT SELECTION-SCREEN OUTPUT.
+
+  LOOP AT SCREEN.
+    IF p_upl  = 'X'.
+      IF screen-group1 = 'MF2' OR
+         screen-group1 = 'MF5' OR
+         screen-group1 = 'MF6' OR
+         screen-group1 = 'MF7'.
+        screen-active  = 0.
+        MODIFY SCREEN.
+      ENDIF.
+    ELSEIF p_down = 'X'.
+      IF screen-group1 = 'MF2' OR
+         screen-group1 = 'MF3' OR
+         screen-group1 = 'MF5'.
+        screen-active  = 0.
+        MODIFY SCREEN.
+      ENDIF.
+    ELSEIF p_del = 'X'.
+      IF p_pres1 = 'X'.
+        IF screen-group1 = 'MF4' OR
+           screen-group1 = 'MF5' OR
+           screen-group1 = 'MF6' OR
+           screen-group1 = 'MF7'.
+          screen-active  = 0.
+          MODIFY SCREEN.
+        ENDIF.
+      ELSEIF p_appl1 = 'X'.
+        IF screen-group1 = 'MF3' OR
+           screen-group1 = 'MF5' OR
+           screen-group1 = 'MF6'.
+          screen-active  = 0.
+          MODIFY SCREEN.
+        ENDIF.
+      ENDIF.
+    ENDIF.
+  ENDLOOP.
+
+AT SELECTION-SCREEN ON VALUE-REQUEST FOR p_dir.
+  PERFORM select_dir_from_pc.
+
+AT SELECTION-SCREEN ON VALUE-REQUEST FOR p_pres.
+  PERFORM select_files_from_pc.
+
+AT SELECTION-SCREEN ON VALUE-REQUEST FOR p_file.
+  PERFORM select_files_from_appl.
+
+AT SELECTION-SCREEN ON VALUE-REQUEST FOR p_appl.
+  PERFORM select_direc_from_appl.
+
+START-OF-SELECTION.
+
+  IF p_upl = 'X'.
+    PERFORM upload_files.
+  ELSEIF p_down = 'X'.
+    PERFORM download_files.
+  ELSEIF p_del = 'X'.
+    IF p_pres1 = 'X'.
+      PERFORM delete_pc_files.
+    ELSEIF p_appl1 = 'X'.
+      PERFORM delete_app_files.
+    ENDIF.
+  ENDIF.
+
+END-OF-SELECTION.
+
+*&---------------------------------------------------------------------*
+*&      Form  select_dir_from_pc
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+FORM select_dir_from_pc.
+
+  DATA: lv_dir TYPE string.
+
+  CALL METHOD cl_gui_frontend_services=>directory_browse
+    CHANGING
+      selected_folder      = lv_dir
+    EXCEPTIONS
+      cntl_error           = 1
+      error_no_gui         = 2
+      not_supported_by_gui = 3
+      OTHERS               = 4.
+  IF sy-subrc = 0.
+    p_dir = lv_dir.
+  ENDIF.
+
+ENDFORM.                    "select_dir_from_pc
+
+*&---------------------------------------------------------------------*
+*&      Form  select_files_from_pc
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+FORM select_files_from_pc.
+
+  DATA lv_rc TYPE i.
+
+  CALL METHOD cl_gui_frontend_services=>file_open_dialog
+    EXPORTING
+*      file_filter             = '*.txt|*.TXT'
+      multiselection          = 'X'
+    CHANGING
+      file_table              = it_pcfile
+      rc                      = lv_rc
+    EXCEPTIONS
+      file_open_dialog_failed = 1
+      cntl_error              = 2
+      error_no_gui            = 3
+      not_supported_by_gui    = 4
+      OTHERS                  = 5.
+  IF sy-subrc = 0.
+    SORT it_pcfile BY filename.
+  ENDIF.
+
+ENDFORM.                    "select_files_from_pc
+
+*&---------------------------------------------------------------------*
+*&      Form  select_files_from_appl
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+FORM select_files_from_appl.
+
+  DATA: lt_dynp TYPE TABLE OF dynpread,
+        lt_pcfile TYPE TABLE OF eps2fili,
+        ls_dynp TYPE dynpread,
+        "ls_pcfile TYPE eps2fili,
+        lv_dir  TYPE eps2filnam.
+
+  ls_dynp-fieldname = 'P_APPL'.
+  APPEND ls_dynp TO lt_dynp.
+** Get Value of P_APPL
+  CALL FUNCTION 'DYNP_VALUES_READ'
+    EXPORTING
+      dyname               = sy-repid
+      dynumb               = sy-dynnr
+    TABLES
+      dynpfields           = lt_dynp
+    EXCEPTIONS
+      invalid_abapworkarea = 1
+      invalid_dynprofield  = 2
+      invalid_dynproname   = 3
+      invalid_dynpronummer = 4
+      invalid_request      = 5
+      no_fielddescription  = 6
+      invalid_parameter    = 7
+      undefind_error       = 8
+      double_conversion    = 9
+      stepl_not_found      = 10
+      OTHERS               = 11.
+  IF sy-subrc = 0.
+    READ TABLE lt_dynp INTO ls_dynp INDEX 1.
+    IF sy-subrc IS INITIAL.
+      lv_dir = ls_dynp-fieldvalue.
+    ENDIF.
+** Get List of Files in the selected directory
+    IF lv_dir IS NOT INITIAL.
+      CALL FUNCTION 'EPS2_GET_DIRECTORY_LISTING'
+        EXPORTING
+          iv_dir_name            = lv_dir
+        TABLES
+          dir_list               = lt_pcfile
+        EXCEPTIONS
+          invalid_eps_subdir     = 1
+          sapgparam_failed       = 2
+          build_directory_failed = 3
+          no_authorization       = 4
+          read_directory_failed  = 5
+          too_many_read_errors   = 6
+          empty_directory_list   = 7
+          OTHERS                 = 8.
+      IF sy-subrc <> 0.
+        MESSAGE text-015 TYPE 'I'.
+      ELSE.
+        CALL FUNCTION 'F4IF_INT_TABLE_VALUE_REQUEST'
+          EXPORTING
+            retfield        = 'NAME'
+            dynpprog        = sy-repid
+            dynpnr          = sy-dynnr
+            value_org       = 'S'
+            multiple_choice = 'X'
+          TABLES
+            value_tab       = lt_pcfile
+            return_tab      = it_appfile
+          EXCEPTIONS
+            parameter_error = 1
+            no_values_found = 2
+            OTHERS          = 3.
+        IF sy-subrc = 0.
+          SORT it_appfile.
+        ENDIF.
+      ENDIF.
+    ENDIF.
+
+  ENDIF.
+
+ENDFORM.                    "select_files_from_appl
+
+*&---------------------------------------------------------------------*
+*&      Form  upload_files
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+FORM upload_files.
+
+  DATA: lv_file   TYPE rcgfiletr-ftappl,
+        lt_match  TYPE match_result_tab,
+        ls_match  TYPE match_result,
+        lv_count  TYPE i,
+        lv_len    TYPE i,
+        lv_offset TYPE i,
+        lv_chars  TYPE i,
+        lv_temp   TYPE char256,
+        lt_data   TYPE TABLE OF text4096,
+        ls_data   TYPE text4096,
+        lv_fname  TYPE string.
+
+  LOOP AT it_pcfile INTO wa_pcfile.
+
+    CLEAR: lv_file, lv_temp, lv_len, lv_count, lv_offset, lv_chars.
+
+    FIND ALL OCCURRENCES OF '\' IN wa_pcfile-filename RESULTS lt_match.
+    DESCRIBE TABLE lt_match LINES lv_count.
+    READ TABLE lt_match INTO ls_match INDEX lv_count.
+    IF sy-subrc IS INITIAL.
+      lv_len = STRLEN( wa_pcfile-filename ).
+      lv_offset = ls_match-offset + 1.
+      lv_chars = lv_len - lv_offset.
+      lv_temp = wa_pcfile-filename+lv_offset(lv_chars).
+    ENDIF.
+
+    CONCATENATE p_appl '/' lv_temp INTO lv_file.
+
+    CLEAR lv_fname.
+    REFRESH lt_data.
+    lv_fname = wa_pcfile-filename.
+    CALL FUNCTION 'GUI_UPLOAD'
+      EXPORTING
+        filename                = lv_fname
+        filetype                = 'ASC'
+      TABLES
+        data_tab                = lt_data
+      EXCEPTIONS
+        file_open_error         = 1
+        file_read_error         = 2
+        no_batch                = 3
+        gui_refuse_filetransfer = 4
+        invalid_type            = 5
+        no_authority            = 6
+        unknown_error           = 7
+        bad_data_format         = 8
+        header_not_allowed      = 9
+        separator_not_allowed   = 10
+        header_too_long         = 11
+        unknown_dp_error        = 12
+        access_denied           = 13
+        dp_out_of_memory        = 14
+        disk_full               = 15
+        dp_timeout              = 16
+        OTHERS                  = 17.
+    IF sy-subrc = 0.
+      OPEN DATASET lv_file IN TEXT MODE FOR OUTPUT ENCODING DEFAULT.
+      IF sy-subrc IS INITIAL.
+        LOOP AT lt_data INTO ls_data.
+          TRANSFER ls_data TO lv_file.
+        ENDLOOP.
+        CLOSE DATASET lv_file.
+        WRITE: / text-009, wa_pcfile-filename.
+      ELSE.
+        WRITE: / text-010, wa_pcfile-filename.
+      ENDIF.
+    ELSE.
+      WRITE: / text-010, wa_pcfile-filename.
+    ENDIF.
+  ENDLOOP.
+
+ENDFORM.                    "upload_files
+
+*&---------------------------------------------------------------------*
+*&      Form  download_files
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+FORM download_files.
+
+  DATA: lv_pcfile TYPE string,
+        lv_apfile TYPE rcgfiletr-ftappl,
+        lv_rvstri TYPE rcgfiletr-ftappl,
+        lt_data   TYPE TABLE OF text4096,
+        ls_data   TYPE text4096.
+
+  LOOP AT it_appfile INTO wa_appfile.
+
+    CLEAR: lv_pcfile, lv_apfile.
+
+    CONCATENATE: p_dir '\'  wa_appfile-fieldval INTO lv_pcfile,
+                 p_appl '/' wa_appfile-fieldval INTO lv_apfile.
+
+    REFRESH lt_data.
+    CALL FUNCTION 'STRING_REVERSE'
+      EXPORTING
+        string    = lv_apfile
+        lang      = sy-langu
+      IMPORTING
+        rstring   = lv_rvstri
+      EXCEPTIONS
+        too_small = 1
+        OTHERS    = 2.
+    IF    ( sy-subrc = 0
+      AND ( lv_rvstri+0(3) = 'FDP'
+      OR    lv_rvstri+0(3) = 'fdp') ) .
+
+      sy-cprog = 'SAPLC13G'."#EC WRITE_OK
+      CALL FUNCTION 'C13Z_FILE_DOWNLOAD_BINARY'
+        EXPORTING
+          i_file_front_end   = lv_pcfile
+          i_file_appl        = lv_apfile
+          i_file_overwrite   = 'X'
+        EXCEPTIONS
+          fe_file_open_error = 1
+          fe_file_exists     = 2
+          ap_no_authority    = 4.
+    ELSEif ( sy-subrc = 0 ).
+      OPEN
+       DATASET lv_apfile
+            IN TEXT MODE
+           FOR INPUT
+      ENCODING DEFAULT.
+      IF sy-subrc = 0.
+        DO.
+          READ DATASET lv_apfile INTO ls_data.
+          IF sy-subrc IS INITIAL.
+            APPEND ls_data TO lt_data.
+          ELSE.
+            EXIT.
+          ENDIF.
+        ENDDO.
+        CLOSE DATASET lv_apfile.
+      ENDIF.
+      CALL FUNCTION 'GUI_DOWNLOAD'
+        EXPORTING
+          filename                = lv_pcfile
+          append                  = 'X'
+        TABLES
+          data_tab                = lt_data
+        EXCEPTIONS
+          file_write_error        = 1
+          no_batch                = 2
+          gui_refuse_filetransfer = 3
+          invalid_type            = 4
+          no_authority            = 5
+          unknown_error           = 6
+          header_not_allowed      = 7
+          separator_not_allowed   = 8
+          filesize_not_allowed    = 9
+          header_too_long         = 10
+          dp_error_create         = 11
+          dp_error_send           = 12
+          dp_error_write          = 13
+          unknown_dp_error        = 14
+          access_denied           = 15
+          dp_out_of_memory        = 16
+          disk_full               = 17
+          dp_timeout              = 18
+          file_not_found          = 19
+          dataprovider_exception  = 20
+          control_flush_error     = 21
+          OTHERS                  = 22.
+    ENDIF.
+
+    IF sy-subrc = 0.
+      WRITE: / text-011, lv_pcfile.
+    ELSE.
+      WRITE: / text-012, lv_apfile.
+    ENDIF.
+
+  ENDLOOP.
+
+ENDFORM.                    "download_files
+
+*&---------------------------------------------------------------------*
+*&      Form  delete_pc_files
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+FORM delete_pc_files.
+
+  DATA: lv_pcfile TYPE string,
+        lv_rc     TYPE i.
+
+  LOOP AT it_pcfile INTO wa_pcfile.
+
+    CLEAR lv_pcfile.
+    lv_pcfile = wa_pcfile-filename.
+
+    CALL METHOD cl_gui_frontend_services=>file_delete
+      EXPORTING
+        filename             = lv_pcfile
+      CHANGING
+        rc                   = lv_rc
+      EXCEPTIONS
+        file_delete_failed   = 1
+        cntl_error           = 2
+        error_no_gui         = 3
+        file_not_found       = 4
+        access_denied        = 5
+        unknown_error        = 6
+        not_supported_by_gui = 7
+        wrong_parameter      = 8
+        OTHERS               = 9.
+    IF sy-subrc = 0.
+      WRITE: / text-013, lv_pcfile.
+    ELSE.
+      WRITE: / text-014, lv_pcfile.
+    ENDIF.
+
+  ENDLOOP.
+
+ENDFORM.                    "delete_pc_files
+
+*&---------------------------------------------------------------------*
+*&      Form  delete_app_files
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+FORM delete_app_files.
+
+  DATA lv_apfile TYPE rcgfiletr-ftappl.
+
+  LOOP AT it_appfile INTO wa_appfile.
+    CLEAR: lv_apfile.
+    CONCATENATE p_appl '/' wa_appfile-fieldval INTO lv_apfile.
+    DELETE DATASET lv_apfile.
+    IF sy-subrc IS INITIAL.
+      WRITE: / text-013, lv_apfile.
+    ELSE.
+      WRITE: / text-014, lv_apfile.
+    ENDIF.
+  ENDLOOP.
+
+ENDFORM.                    "delete_app_files
+*&---------------------------------------------------------------------*
+*&      Form  SELECT_DIREC_FROM_APPL
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*  -->  p1        text
+*  <--  p2        text
+*----------------------------------------------------------------------*
+FORM select_direc_from_appl .
+
+  TYPES : BEGIN OF ty_direc,
+          dirnme TYPE dirname,
+          END OF ty_direc .
+
+  DATA : lv_path TYPE TABLE OF ddshretval,
+         lt_dir TYPE TABLE OF ty_direc .
+
+  DATA : wa_path TYPE ddshretval.
+
+  "selecting the list of custom directory in application server
+  SELECT dirname
+    FROM user_dir
+    INTO
+   TABLE lt_dir .
+
+  CALL FUNCTION 'F4IF_INT_TABLE_VALUE_REQUEST'  "Fm to display the IT as Serach help
+    EXPORTING
+*   DDIC_STRUCTURE         = ' '
+      retfield             = 'DIRNME'
+      dynpprog             = sy-repid
+      dynpnr               = sy-dynnr
+      value_org            = 'S'
+    TABLES
+      value_tab            = lt_dir
+   return_tab              = lv_path
+   EXCEPTIONS
+     parameter_error        = 1
+     no_values_found        = 2
+     OTHERS                 = 3.
+
+  IF sy-subrc = 0 AND lv_path IS NOT INITIAL .
+
+    READ
+    TABLE lv_path
+    INTO  wa_path
+    INDEX 1.
+
+    p_appl = wa_path-fieldval.
+
+  ENDIF.
+
+ENDFORM.                    " SELECT_DIREC_FROM_APPL
